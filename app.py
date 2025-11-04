@@ -1,6 +1,7 @@
 import streamlit as st
 
-st.title("Wordle WhatsApp Analyzer 🟩🟨⬛")
+st.title("Wordle WhatsApp Analyzer 🟩🟨⬛ — v2 test")
+
 st.write("Upload your exported WhatsApp chat to begin!")
 
 uploaded = st.file_uploader("Upload _chat.txt", type=["txt"])
