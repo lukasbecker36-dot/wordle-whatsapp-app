@@ -58,8 +58,31 @@ def build_individuals_wide(tidy_df: pd.DataFrame) -> Tuple[pd.DataFrame, List[st
     return pivot, list(pivot.columns)
 
 # ---------------- Plot helpers (matplotlib figures) ----------------
-def fig_all_time_player_average(df_wide: pd.DataFrame, player_cols: List[str]):
-    avgs = df_wide[player_cols].mean().sort_values()  # includes 8s
+def fig_overall_leader(df_calc: pd.DataFrame, player_cols: List[str]):
+    """
+    Line chart of ALL players' cumulative averages over time (using df_calc as provided).
+    Lower is better. Leader metric uses the latest cumulative average.
+    """
+    cumavg = df_calc[player_cols].expanding(min_periods=1).mean()
+
+    # Determine the current leader (lowest cumulative avg at the end), ignoring NaNs
+    latest = cumavg.iloc[-1].dropna()
+    leader_name = latest.idxmin() if not latest.empty else "—"
+    leader_value = float(latest.min()) if not latest.empty else float("nan")
+
+    fig, ax = plt.subplots(figsize=(14, 7))
+    sns.lineplot(data=cumavg[player_cols], ax=ax, linewidth=1.6)
+    ax.set_title("Overall Leader — Cumulative Average per Player Over Time (lower is better)")
+    ax.set_xlabel("Date")
+    ax.set_ylabel("Cumulative Average")
+    ax.grid(True, linestyle="--", alpha=0.5)
+    ax.legend(title="Player", loc="upper left", bbox_to_anchor=(1.02, 1), borderaxespad=0.)
+    fig.tight_layout()
+    return fig, leader_name, leader_value
+
+def fig_all_time_player_average(df_calc: pd.DataFrame, player_cols: List[str]):
+    # mean() will ignore NaN if present (i.e., when excluding 8s)
+    avgs = df_calc[player_cols].mean().dropna().sort_values()
     fig, ax = plt.subplots(figsize=(12, 6))
     sns.barplot(x=avgs.index, y=avgs.values, ax=ax)
     ax.set_title("All-time Player Average (lower is better)")
@@ -67,11 +90,11 @@ def fig_all_time_player_average(df_wide: pd.DataFrame, player_cols: List[str]):
     ax.set_ylabel("Average Score")
     ax.tick_params(axis="x", rotation=45)
     ax.grid(axis="y", linestyle="--", alpha=0.5)
-    return fig, avgs
+    return fig
 
-def fig_rolling_28_day_average(df_wide: pd.DataFrame, player_cols: List[str]):
-    # Rolling mean over the last 28 rows (days), includes 8s by design
-    rolling = df_wide[player_cols].rolling(window=28, min_periods=1).mean()
+def fig_rolling_28_day_average(df_calc: pd.DataFrame, player_cols: List[str]):
+    # rolling().mean() ignores NaN by default
+    rolling = df_calc[player_cols].rolling(window=28, min_periods=1).mean()
     fig, ax = plt.subplots(figsize=(14, 7))
     sns.lineplot(data=rolling[player_cols], ax=ax, linewidth=1.6)
     ax.set_title("Rolling 28-Day Player Average")
@@ -82,39 +105,12 @@ def fig_rolling_28_day_average(df_wide: pd.DataFrame, player_cols: List[str]):
     fig.tight_layout()
     return fig
 
-def fig_overall_leader(df_wide: pd.DataFrame, player_cols: List[str]):
-    """
-    Show cumulative average per player + highlight the leader over time.
-    We'll plot only the "current best" (lowest cumulative avg) line to keep it readable,
-    and display the all-time leader as a metric.
-    """
-    cumavg = df_wide[player_cols].expanding(min_periods=1).mean()
-    # Per date, find the player with the lowest cum avg
-    best_vals = cumavg.min(axis=1)                    # numeric best value per date
-    best_player = cumavg.idxmin(axis=1)               # which player leads per date
-
-    # All-time leader (lowest average over the full period)
-    all_time_avgs = df_wide[player_cols].mean()
-    all_time_leader = all_time_avgs.idxmin()
-    all_time_value = all_time_avgs.min()
-
-    # Plot the best cumulative average over time
-    fig, ax = plt.subplots(figsize=(12, 5))
-    ax.plot(best_vals.index, best_vals.values, linewidth=2)
-    ax.set_title("Overall Leader Over Time (lowest cumulative average)")
-    ax.set_xlabel("Date")
-    ax.set_ylabel("Best Cumulative Avg")
-    ax.grid(True, linestyle="--", alpha=0.5)
-
-    return fig, all_time_leader, float(all_time_value), best_player
-
 def fig_score_distributions(df_wide: pd.DataFrame, player_cols: List[str]):
     """
-    Histograms of scores per player, excluding 8s.
+    Histograms of scores per player, excluding 8s (always excluded here).
     """
     data = df_wide[player_cols].replace(8, pd.NA)
 
-    # Compute grid size
     n = len(player_cols)
     cols = min(4, n if n > 0 else 1)
     rows = (n + cols - 1) // cols if n else 1
@@ -159,46 +155,47 @@ if uploaded:
     with st.expander("Preview parsed entries"):
         st.dataframe(tidy.head(50), use_container_width=True)
 
-    # Build Individuals wide frame
+    # Build Individuals wide frame (8 = missed day)
     df_wide, player_cols = build_individuals_wide(tidy)
 
-    # -------- Individuals Section --------
+    # ===== NEW: Global toggle for excluding 8s from averages/rolling =====
+    exclude_8s = st.checkbox("Exclude 8s from averages/rolling (treat as missing)", value=False,
+                             help="When checked, scores of 8 are treated as missing (NaN) in averages, cumulative averages, and rolling averages. Distributions already exclude 8s.")
+    # Data used for calculations in Individuals charts:
+    df_calc = df_wide.replace(8, pd.NA) if exclude_8s else df_wide
+
+    if exclude_8s:
+        st.info("Excluding 8s from averages/rolling. Players with only 8s or no data may drop out of certain charts.")
+
+    # -------- Individuals Section (Overall leader first) --------
     st.header("Individuals")
 
     tabs = st.tabs([
+        "Overall leader",
         "All-time averages",
         "Rolling 28-day averages",
-        "Overall leader",
         "Score distributions",
     ])
 
     with tabs[0]:
-        fig1, avgs = fig_all_time_player_average(df_wide, player_cols)
-        st.pyplot(fig1, clear_figure=True)
+        fig_leader, leader_name, leader_value = fig_overall_leader(df_calc, player_cols)
+        c1, c2 = st.columns(2)
+        with c1:
+            st.metric("Current Leader", leader_name)
+        with c2:
+            st.metric("Current Best Cumulative Avg", "—" if pd.isna(leader_value) else f"{leader_value:.2f}")
+        st.pyplot(fig_leader, clear_figure=True)
 
     with tabs[1]:
-        st.pyplot(fig_rolling_28_day_average(df_wide, player_cols), clear_figure=True)
+        st.pyplot(fig_all_time_player_average(df_calc, player_cols), clear_figure=True)
 
     with tabs[2]:
-        fig3, leader_name, leader_value, leaders_over_time = fig_overall_leader(df_wide, player_cols)
-        cols = st.columns(3)
-        with cols[0]:
-            st.metric("All-time Leader", leader_name)
-        with cols[1]:
-            st.metric("All-time Best Average", f"{leader_value:.2f}")
-        with cols[2]:
-            st.write("")  # spacer
-        st.pyplot(fig3, clear_figure=True)
-
-        # Optional: show a small table indicating who led most days
-        leader_counts = leaders_over_time.value_counts().rename_axis("Player").to_frame("Days Leading")
-        with st.expander("Who led most often over time?"):
-            st.dataframe(leader_counts, use_container_width=True)
+        st.pyplot(fig_rolling_28_day_average(df_calc, player_cols), clear_figure=True)
 
     with tabs[3]:
         st.pyplot(fig_score_distributions(df_wide, player_cols), clear_figure=True)
 
-    # Download parsed data (tidy + wide)
+    # Downloads
     dl_col1, dl_col2 = st.columns(2)
     with dl_col1:
         st.download_button(
@@ -226,12 +223,11 @@ if uploaded:
             team_b_label = st.text_input("Team B name", value="Girls")
             team_b = st.multiselect(f"{team_b_label} members", players, key="teamB")
 
-        # Only compute if user selects members
         if team_a or team_b:
-            # Limit to selected members that actually exist
             a_cols = [c for c in team_a if c in df_wide.columns]
             b_cols = [c for c in team_b if c in df_wide.columns]
 
+            # Team calculations use the original convention (8 counts) so team totals reflect participation.
             df_teams = df_wide.copy()
             df_teams[f"{team_a_label} Total"] = df_teams[a_cols].sum(axis=1) if a_cols else 0
             df_teams[f"{team_b_label} Total"] = df_teams[b_cols].sum(axis=1) if b_cols else 0
