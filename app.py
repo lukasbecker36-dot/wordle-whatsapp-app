@@ -1,5 +1,5 @@
 import re
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from typing import List, Tuple
 
 import pandas as pd
@@ -62,25 +62,29 @@ def filter_by_date_range(df_wide: pd.DataFrame, start: date, end: date) -> pd.Da
     return df_wide[(df_wide.index >= start_ts) & (df_wide.index <= end_ts)]
 
 # ---------------- Plot helpers ----------------
-def fig_overall_leader_cumulative(df_wide: pd.DataFrame, player_cols: List[str]):
-    """Cumulative **sum** over time for all players. Lower is better."""
+def compute_cumsum(df_wide: pd.DataFrame, player_cols: List[str]) -> Tuple[pd.DataFrame, pd.Series, str, float]:
+    """
+    Compute cumulative sum time series and latest totals/leader for the given df.
+    Returns: (cumsum_df, latest_totals_series, leader_name, leader_value)
+    """
     if df_wide.empty:
-        return None, "—", float("nan"), pd.Series(dtype=float)
-
+        return pd.DataFrame(), pd.Series(dtype=float), "—", float("nan")
     cumsum = df_wide[player_cols].cumsum()
     latest = cumsum.iloc[-1]
     leader_name = latest.idxmin()
     leader_value = float(latest.min())
+    return cumsum, latest.sort_values(), leader_name, leader_value
 
+def plot_cumsum(cumsum: pd.DataFrame) -> plt.Figure:
     fig, ax = plt.subplots(figsize=(14, 7))
-    sns.lineplot(data=cumsum[player_cols], ax=ax, linewidth=1.6)
+    sns.lineplot(data=cumsum, ax=ax, linewidth=1.6)
     ax.set_title("Overall Leader — Cumulative Score per Player Over Time (lower is better)")
     ax.set_xlabel("Date")
     ax.set_ylabel("Cumulative Score (sum)")
     ax.grid(True, linestyle="--", alpha=0.5)
     ax.legend(title="Player", loc="upper left", bbox_to_anchor=(1.02, 1), borderaxespad=0.)
     fig.tight_layout()
-    return fig, leader_name, leader_value, latest.sort_values()
+    return fig
 
 def fig_all_time_player_average(df_wide: pd.DataFrame, player_cols: List[str]):
     if df_wide.empty:
@@ -95,12 +99,14 @@ def fig_all_time_player_average(df_wide: pd.DataFrame, player_cols: List[str]):
     ax.grid(axis="y", linestyle="--", alpha=0.5)
     return fig
 
-def fig_rolling_28_day_average(df_wide: pd.DataFrame, player_cols: List[str]):
+def compute_rolling28(df_wide: pd.DataFrame, player_cols: List[str]) -> pd.DataFrame:
     if df_wide.empty:
-        return None
-    rolling = df_wide[player_cols].rolling(window=28, min_periods=1).mean()
+        return pd.DataFrame()
+    return df_wide[player_cols].rolling(window=28, min_periods=1).mean()
+
+def plot_rolling28(rolling: pd.DataFrame) -> plt.Figure:
     fig, ax = plt.subplots(figsize=(14, 7))
-    sns.lineplot(data=rolling[player_cols], ax=ax, linewidth=1.6)
+    sns.lineplot(data=rolling, ax=ax, linewidth=1.6)
     ax.set_title("Rolling 28-Day Player Average")
     ax.set_xlabel("Date")
     ax.set_ylabel("Rolling Avg (28d)")
@@ -211,7 +217,7 @@ if uploaded:
     col_date, col_reset = st.columns([4, 1])
     with col_date:
         dr_val = st.date_input(
-            "Select date range for charts",
+            "Select date range for charts — calculate scores based on this period only",
             value=st.session_state["date_range"],
             min_value=min_d,
             max_value=max_d,
@@ -261,8 +267,9 @@ if uploaded:
 
     # --- Overall leader ---
     with tabs[0]:
-        fig_leader, leader_name, leader_value, cum_totals_sorted = fig_overall_leader_cumulative(df_range, player_cols)
-        if fig_leader is None:
+        # Compute once on the full selected range
+        cumsum_full, latest_sorted, leader_name, leader_value = compute_cumsum(df_range, player_cols)
+        if cumsum_full.empty:
             st.warning("No data in selected date range.")
         else:
             c1, c2 = st.columns(2)
@@ -271,17 +278,31 @@ if uploaded:
             with c2:
                 st.metric("Current Best Cumulative Score", f"{leader_value:.0f}")
 
-            # Other players (ascending) listed ABOVE chart
-            others = cum_totals_sorted.drop(labels=[leader_name]) if leader_name in cum_totals_sorted.index else cum_totals_sorted
+            # "Other" leaderboard above chart
+            others = latest_sorted.drop(labels=[leader_name]) if leader_name in latest_sorted.index else latest_sorted
             if not others.empty:
                 lines = [f"- **{name}** — {int(val)}" for name, val in others.items()]
                 st.markdown("<div style='font-size:0.9rem'>Other cumulative totals:</div>", unsafe_allow_html=True)
                 st.markdown("\n".join(lines), unsafe_allow_html=True)
 
-            st.pyplot(fig_leader, clear_figure=True)
+            # Last 30 days view (display-only trim)
+            last30 = st.button("Last 30 days view", key="leader_last30",
+                               help="Only trims the visible chart window; metrics still reflect the full selected range.")
+            cumsum_plot = cumsum_full
+            if last30 and not cumsum_full.empty:
+                cutoff = cumsum_full.index.max() - timedelta(days=29)
+                cumsum_plot = cumsum_full[cumsum_full.index >= cutoff]
+
+            fig = plot_cumsum(cumsum_plot)
+            if fig:
+                st.pyplot(fig, clear_figure=True)
+            else:
+                st.warning("No data to plot.")
 
     # --- All-time averages ---
     with tabs[1]:
+        st.caption("Tip: This chart is not a time series; Last 30 days view does not apply.")
+        _ = st.button("Last 30 days view", key="avg_last30", disabled=True)
         fig = fig_all_time_player_average(df_range, player_cols)
         if fig:
             st.pyplot(fig, clear_figure=True)
@@ -290,14 +311,27 @@ if uploaded:
 
     # --- Rolling 28-day averages ---
     with tabs[2]:
-        fig = fig_rolling_28_day_average(df_range, player_cols)
-        if fig:
-            st.pyplot(fig, clear_figure=True)
-        else:
+        rolling_full = compute_rolling28(df_range, player_cols)
+        if rolling_full.empty:
             st.warning("No data in selected date range.")
+        else:
+            last30 = st.button("Last 30 days view", key="roll_last30",
+                               help="Only trims the visible chart window; averages are computed on the selected range.")
+            rolling_plot = rolling_full
+            if last30 and not rolling_full.empty:
+                cutoff = rolling_full.index.max() - timedelta(days=29)
+                rolling_plot = rolling_full[rolling_full.index >= cutoff]
+
+            fig = plot_rolling28(rolling_plot)
+            if fig:
+                st.pyplot(fig, clear_figure=True)
+            else:
+                st.warning("No data to plot.")
 
     # --- Score distributions ---
     with tabs[3]:
+        st.caption("Tip: This chart is not a time series; Last 30 days view does not apply.")
+        _ = st.button("Last 30 days view", key="dist_last30", disabled=True)
         fig = fig_score_distributions(df_range, player_cols)
         if fig:
             st.pyplot(fig, clear_figure=True)
@@ -306,6 +340,8 @@ if uploaded:
 
     # --- Day-of-week averages ---
     with tabs[4]:
+        st.caption("Tip: This is an aggregate by weekday; Last 30 days view does not apply.")
+        _ = st.button("Last 30 days view", key="dow_last30", disabled=True)
         fig = fig_day_of_week_averages(df_range, player_cols)
         if fig:
             st.pyplot(fig, clear_figure=True)
@@ -314,6 +350,8 @@ if uploaded:
 
     # --- Weekly winners ---
     with tabs[5]:
+        st.caption("Tip: This ranking is weekly (Mon→Sun); Last 30 days view does not apply.")
+        _ = st.button("Last 30 days view", key="weekly_last30", disabled=True)
         winners_count, last_full_week_winners = compute_weekly_winners(df_range, player_cols)
         if winners_count.empty:
             st.warning("Not enough data to compute weekly winners in the selected date range.")
@@ -397,6 +435,7 @@ if uploaded:
         "- **Lower is better** across all charts.\n"
         "- **Overall leader** uses the **cumulative sum** over time.\n"
         "- **Rolling 28-day average** and other averages include 8s."
+        "- **Note: this app is produced independently and is obviously not affiliated with Wordle or the New York Times."
     )
 
 else:
