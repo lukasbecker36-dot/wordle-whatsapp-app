@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 
 # ---------------- Streamlit page config ----------------
-st.set_page_config(page_title="Wordle WhatsApp Analyzer", page_icon="🟩", layout="wide")
+st.set_page_config(page_title="Wordle Stats", page_icon="🟩", layout="wide")
 st.title("Wordle WhatsApp Analyzer 🟩🟨⬛")
 
 # Top privacy note
@@ -362,6 +362,53 @@ if uploaded:
             ax.grid(axis="y", linestyle="--", alpha=0.5)
             st.pyplot(fig, clear_figure=True)
 
+    # -------- Teams --------
+    st.header("Teams")
+
+    players = sorted(tidy["Name"].unique().tolist())
+    cA, cB = st.columns(2)
+    with cA:
+        team_a_label = st.text_input("Team A name", value="Team A", key="teamA_label")
+        team_a = st.multiselect(f"{team_a_label} members", players, key="teamA_members")
+    with cB:
+        team_b_label = st.text_input("Team B name", value="Team B", key="teamB_label")
+        team_b = st.multiselect(f"{team_b_label} members", players, key="teamB_members")
+
+    if team_a or team_b:
+        a_cols = [c for c in team_a if c in df_range.columns]
+        b_cols = [c for c in team_b if c in df_range.columns]
+
+        df_teams = df_range.copy()
+        df_teams[f"{team_a_label} Total"] = df_teams[a_cols].sum(axis=1) if a_cols else 0
+        df_teams[f"{team_b_label} Total"] = df_teams[b_cols].sum(axis=1) if b_cols else 0
+        df_teams[f"{team_a_label} Wins"] = (df_teams[f"{team_a_label} Total"] < df_teams[f"{team_b_label} Total"]).astype(int).cumsum()
+        df_teams[f"{team_b_label} Wins"] = (df_teams[f"{team_b_label} Total"] < df_teams[f"{team_a_label} Total"]).astype(int).cumsum()
+
+        t_tabs = st.tabs(["Team totals over time", "Cumulative wins"])
+        with t_tabs[0]:
+            fig, ax = plt.subplots(figsize=(10, 5))
+            sns.lineplot(data=df_teams[[f"{team_a_label} Total", f"{team_b_label} Total"]], ax=ax)
+            ax.set_title("Daily Team Totals")
+            ax.set_xlabel("Date")
+            ax.set_ylabel("Total Score")
+            ax.grid(True, linestyle="--", alpha=0.5)
+            st.pyplot(fig, clear_figure=True)
+
+        with t_tabs[1]:
+            fig, ax = plt.subplots(figsize=(10, 5))
+            sns.lineplot(
+                data=df_teams[[f"{team_a_label} Wins", f"{team_b_label} Wins"]],
+                drawstyle="steps-post",
+                ax=ax
+            )
+            ax.set_title("Cumulative Team Wins")
+            ax.set_xlabel("Date")
+            ax.set_ylabel("Wins")
+            ax.grid(True, linestyle="--", alpha=0.5)
+            st.pyplot(fig, clear_figure=True)
+    else:
+        st.info("Select members for Team A and/or Team B to see team charts.")
+
     # Scoring details
     st.markdown("### Scoring details")
     st.markdown(
@@ -370,7 +417,6 @@ if uploaded:
         "- **Lower is better** across all charts.\n"
         "- **Overall leader** uses the **cumulative sum** over time.\n"
         "- **Rolling 28-day average** and other averages include 8s."
-	"- Note: Obviously this app is not affiliated with Wordle or the New York Times."
     )
 
 else:
