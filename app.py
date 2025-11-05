@@ -63,10 +63,7 @@ def filter_by_date_range(df_wide: pd.DataFrame, start: date, end: date) -> pd.Da
 
 # ---------------- Plot helpers ----------------
 def compute_cumsum(df_wide: pd.DataFrame, player_cols: List[str]) -> Tuple[pd.DataFrame, pd.Series, str, float]:
-    """
-    Compute cumulative sum time series and latest totals/leader for the given df.
-    Returns: (cumsum_df, latest_totals_series, leader_name, leader_value)
-    """
+    """Compute cumulative sum time series and latest totals/leader for the given df."""
     if df_wide.empty:
         return pd.DataFrame(), pd.Series(dtype=float), "—", float("nan")
     cumsum = df_wide[player_cols].cumsum()
@@ -207,7 +204,7 @@ if uploaded:
     # Build Individuals wide frame
     df_wide, player_cols = build_individuals_wide(tidy)
 
-    # --- Date range selector with Reset button ---
+    # --- Date range selector with Reset button (UK format) ---
     min_d = df_wide.index.min().date()
     max_d = df_wide.index.max().date()
 
@@ -222,6 +219,7 @@ if uploaded:
             min_value=min_d,
             max_value=max_d,
             key="date_input_widget",
+            format="DD/MM/YYYY",  # UK-style display
         )
     with col_reset:
         if st.button("Reset", help="Reset to full available date range"):
@@ -285,13 +283,27 @@ if uploaded:
                 st.markdown("<div style='font-size:0.9rem'>Other cumulative totals:</div>", unsafe_allow_html=True)
                 st.markdown("\n".join(lines), unsafe_allow_html=True)
 
-            # Last 30 days view (display-only trim)
-            last30 = st.button("Last 30 days view", key="leader_last30",
-                               help="Only trims the visible chart window; metrics still reflect the full selected range.")
+            # Display-only window controls
+            bcol1, bcol2 = st.columns([1, 1])
+            with bcol1:
+                last30 = st.button(
+                    "Last 30 days view",
+                    key="leader_last30",
+                    help="Only trims the visible chart window; metrics still reflect the full selected range."
+                )
+            with bcol2:
+                fullview = st.button(
+                    "Full view",
+                    key="leader_fullview",
+                    help="Show the full selected date range in the chart."
+                )
+
             cumsum_plot = cumsum_full
             if last30 and not cumsum_full.empty:
                 cutoff = cumsum_full.index.max() - timedelta(days=29)
                 cumsum_plot = cumsum_full[cumsum_full.index >= cutoff]
+            elif fullview:
+                cumsum_plot = cumsum_full
 
             fig = plot_cumsum(cumsum_plot)
             if fig:
@@ -303,6 +315,7 @@ if uploaded:
     with tabs[1]:
         st.caption("Tip: This chart is not a time series; Last 30 days view does not apply.")
         _ = st.button("Last 30 days view", key="avg_last30", disabled=True)
+        _ = st.button("Full view", key="avg_fullview", disabled=True)
         fig = fig_all_time_player_average(df_range, player_cols)
         if fig:
             st.pyplot(fig, clear_figure=True)
@@ -315,12 +328,26 @@ if uploaded:
         if rolling_full.empty:
             st.warning("No data in selected date range.")
         else:
-            last30 = st.button("Last 30 days view", key="roll_last30",
-                               help="Only trims the visible chart window; averages are computed on the selected range.")
+            bcol1, bcol2 = st.columns([1, 1])
+            with bcol1:
+                last30 = st.button(
+                    "Last 30 days view",
+                    key="roll_last30",
+                    help="Only trims the visible chart window; averages are computed on the selected range."
+                )
+            with bcol2:
+                fullview = st.button(
+                    "Full view",
+                    key="roll_fullview",
+                    help="Show the full selected date range in the chart."
+                )
+
             rolling_plot = rolling_full
             if last30 and not rolling_full.empty:
                 cutoff = rolling_full.index.max() - timedelta(days=29)
                 rolling_plot = rolling_full[rolling_full.index >= cutoff]
+            elif fullview:
+                rolling_plot = rolling_full
 
             fig = plot_rolling28(rolling_plot)
             if fig:
@@ -332,6 +359,7 @@ if uploaded:
     with tabs[3]:
         st.caption("Tip: This chart is not a time series; Last 30 days view does not apply.")
         _ = st.button("Last 30 days view", key="dist_last30", disabled=True)
+        _ = st.button("Full view", key="dist_fullview", disabled=True)
         fig = fig_score_distributions(df_range, player_cols)
         if fig:
             st.pyplot(fig, clear_figure=True)
@@ -342,6 +370,7 @@ if uploaded:
     with tabs[4]:
         st.caption("Tip: This is an aggregate by weekday; Last 30 days view does not apply.")
         _ = st.button("Last 30 days view", key="dow_last30", disabled=True)
+        _ = st.button("Full view", key="dow_fullview", disabled=True)
         fig = fig_day_of_week_averages(df_range, player_cols)
         if fig:
             st.pyplot(fig, clear_figure=True)
@@ -352,6 +381,7 @@ if uploaded:
     with tabs[5]:
         st.caption("Tip: This ranking is weekly (Mon→Sun); Last 30 days view does not apply.")
         _ = st.button("Last 30 days view", key="weekly_last30", disabled=True)
+        _ = st.button("Full view", key="weekly_fullview", disabled=True)
         winners_count, last_full_week_winners = compute_weekly_winners(df_range, player_cols)
         if winners_count.empty:
             st.warning("Not enough data to compute weekly winners in the selected date range.")
@@ -434,8 +464,8 @@ if uploaded:
         "- If a player doesn’t post on a day, that day is recorded as **8**.\n"
         "- **Lower is better** across all charts.\n"
         "- **Overall leader** uses the **cumulative sum** over time.\n"
-        "- **Rolling 28-day average** and other averages include 8s."
-        "- **Note: this app is produced independently and is obviously not affiliated with Wordle or the New York Times."
+        "- **Rolling 28-day average** and other averages include 8s.\n"
+	"- **Obviously this app is not affiliated with Wordle or the New York Times."
     )
 
 else:
