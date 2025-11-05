@@ -228,17 +228,47 @@ if uploaded:
     # Build Individuals wide frame
     df_wide, player_cols = build_individuals_wide(tidy)
 
-    # Date range selector (applies to all Individual charts)
-    min_d = df_wide.index.min().date()
-    max_d = df_wide.index.max().date()
-    dr = st.date_input("Select date range for charts", value=(min_d, max_d), min_value=min_d, max_value=max_d)
-    if isinstance(dr, tuple):
-        start_d, end_d = dr
-    else:
-        # If user picks a single date, treat as [date, date]
-        start_d, end_d = dr, dr
+# Date range selector (applies to all Individual charts)
+min_d = df_wide.index.min().date()
+max_d = df_wide.index.max().date()
 
-    df_range = filter_by_date_range(df_wide, start_d, end_d)
+dr_val = st.date_input(
+    "Select date range for charts",
+    value=(min_d, max_d),   # show as a range picker by default
+    min_value=min_d,
+    max_value=max_d,
+)
+
+# Normalize Streamlit's date_input output:
+# - If it's a tuple/list of 2 -> (start, end)
+# - If it's a tuple/list of 1 -> (d, d)
+# - If it's a single date -> (d, d)
+# - If it's empty/None -> fallback to full range
+def _normalize_date_input(val, fallback_start, fallback_end):
+    if isinstance(val, (list, tuple)):
+        if len(val) == 2:
+            s, e = val
+            s = s or fallback_start
+            e = e or fallback_end
+            return s, e
+        if len(val) == 1:
+            d = val[0] or fallback_start
+            return d, d
+        return fallback_start, fallback_end
+    if val is None:
+        return fallback_start, fallback_end
+    # single date
+    return val, val
+
+start_d, end_d = _normalize_date_input(dr_val, min_d, max_d)
+
+# Ensure start <= end (swap if user picked backwards)
+if start_d > end_d:
+    start_d, end_d = end_d, start_d
+
+df_range = filter_by_date_range(df_wide, start_d, end_d)
+
+    
 
     # -------- Individuals --------
     st.header("Individuals")
