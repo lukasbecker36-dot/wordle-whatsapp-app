@@ -1,5 +1,5 @@
 import re
-from datetime import datetime
+from datetime import datetime, date
 from typing import List, Tuple
 
 import pandas as pd
@@ -11,32 +11,23 @@ import seaborn as sns
 st.set_page_config(page_title="Wordle WhatsApp Analyzer", page_icon="🟩", layout="wide")
 st.title("Wordle WhatsApp Analyzer 🟩🟨⬛")
 
-# How scores are calculated (visible note)
-st.info(
-    "- **X/6** is counted as **7**.\n"
-    "- If a player doesn’t post on a day, they’re treated as **8** for that day (missing).\n"
-    "- **Lower is better**.\n"
-    "- **Overall leader** sums each player’s scores across days (cumulative total), **not** an average.\n"
-    "- **Score distributions** exclude 8s (missed days)."
+# Top privacy note
+st.success(
+    "Privacy: Your file is processed in memory for this session only. "
+    "We don’t persist or store your data on a database; nothing is kept between sessions."
 )
 
 # ---------------- Parsing ----------------
 def parse_chat(text: str, date_locale: str = "dd/mm/yyyy") -> pd.DataFrame:
-    """
-    Parse WhatsApp export text and return a tidy DataFrame: Date, Name, Score.
-    'X' -> 7. (We'll fill true missing entries with 8 later.)
-    """
     text = (text.replace("\u202f", " ")
                 .replace("\u200e", "")
                 .replace("\u00a0", " "))
 
     fmt = "%d/%m/%Y" if date_locale == "dd/mm/yyyy" else "%m/%d/%Y"
 
-    # iOS
     p1 = re.compile(
         r"\[(\d{1,2}/\d{1,2}/\d{4}),\s*\d{1,2}:\d{2}(?::\d{2})?\]\s+([^:]+?):\s+Wordle\s+[\d,]+\s+([1-6xX])/6"
     )
-    # Android
     p2 = re.compile(
         r"(\d{1,2}/\d{1,2}/\d{4}),\s*\d{1,2}:\d{2}(?:\s*[APMapm]{2})?\s*-\s*([^:]+?):\s+Wordle\s+[\d,]+\s+([1-6xX])/6"
     )
@@ -44,12 +35,12 @@ def parse_chat(text: str, date_locale: str = "dd/mm/yyyy") -> pd.DataFrame:
     rows = []
     for (date_str, name, score) in p1.findall(text) + p2.findall(text):
         try:
-            date = datetime.strptime(date_str.strip(), fmt).date().isoformat()
+            d = datetime.strptime(date_str.strip(), fmt).date().isoformat()
         except ValueError:
             continue
         name = re.sub(r"^[^A-Za-z]*", "", name).strip()
         numeric = 7 if score.upper() == "X" else int(score)
-        rows.append({"Date": date, "Name": name, "Score": numeric})
+        rows.append({"Date": d, "Name": name, "Score": numeric})
 
     df = pd.DataFrame(rows)
     if not df.empty:
@@ -57,21 +48,27 @@ def parse_chat(text: str, date_locale: str = "dd/mm/yyyy") -> pd.DataFrame:
     return df
 
 def build_individuals_wide(tidy_df: pd.DataFrame) -> Tuple[pd.DataFrame, List[str]]:
-    """
-    Pivot to Date x Player wide frame, fill missing with 8.
-    """
     pivot = tidy_df.pivot_table(index="Date", columns="Name", values="Score", aggfunc="first")
     pivot.index = pd.to_datetime(pivot.index)
     pivot = pivot.sort_index()
-    pivot = pivot.fillna(8)  # 8 = didn't play / missing
+    pivot = pivot.fillna(8)  # 8 = missed day
     return pivot, list(pivot.columns)
+
+def filter_by_date_range(df_wide: pd.DataFrame, start: date, end: date) -> pd.DataFrame:
+    if df_wide.empty:
+        return df_wide
+    start_ts = pd.to_datetime(start)
+    end_ts = pd.to_datetime(end)
+    return df_wide[(df_wide.index >= start_ts) & (df_wide.index <= end_ts)]
 
 # ---------------- Plot helpers ----------------
 def fig_overall_leader_cumulative(df_wide: pd.DataFrame, player_cols: List[str]):
     """
-    Line chart of ALL players' cumulative **sum** of scores over time.
-    Lower is better. Leader metric uses the lowest total at the latest date.
+    Cumulative **sum** over time for all players. Lower is better.
     """
+    if df_wide.empty:
+        return None, "—", float("nan"), pd.Series(dtype=float)
+
     cumsum = df_wide[player_cols].cumsum()
     latest = cumsum.iloc[-1]
     leader_name = latest.idxmin()
@@ -85,9 +82,11 @@ def fig_overall_leader_cumulative(df_wide: pd.DataFrame, player_cols: List[str])
     ax.grid(True, linestyle="--", alpha=0.5)
     ax.legend(title="Player", loc="upper left", bbox_to_anchor=(1.02, 1), borderaxespad=0.)
     fig.tight_layout()
-    return fig, leader_name, leader_value
+    return fig, leader_name, leader_value, latest.sort_values()
 
 def fig_all_time_player_average(df_wide: pd.DataFrame, player_cols: List[str]):
+    if df_wide.empty:
+        return None
     avgs = df_wide[player_cols].mean().sort_values()  # includes 8s
     fig, ax = plt.subplots(figsize=(12, 6))
     sns.barplot(x=avgs.index, y=avgs.values, ax=ax)
@@ -99,6 +98,8 @@ def fig_all_time_player_average(df_wide: pd.DataFrame, player_cols: List[str]):
     return fig
 
 def fig_rolling_28_day_average(df_wide: pd.DataFrame, player_cols: List[str]):
+    if df_wide.empty:
+        return None
     rolling = df_wide[player_cols].rolling(window=28, min_periods=1).mean()  # includes 8s
     fig, ax = plt.subplots(figsize=(14, 7))
     sns.lineplot(data=rolling[player_cols], ax=ax, linewidth=1.6)
@@ -111,9 +112,8 @@ def fig_rolling_28_day_average(df_wide: pd.DataFrame, player_cols: List[str]):
     return fig
 
 def fig_score_distributions(df_wide: pd.DataFrame, player_cols: List[str]):
-    """
-    Histograms of scores per player, excluding 8s.
-    """
+    if df_wide.empty:
+        return None
     data = df_wide[player_cols].replace(8, pd.NA)
 
     n = len(player_cols)
@@ -144,6 +144,71 @@ def fig_score_distributions(df_wide: pd.DataFrame, player_cols: List[str]):
     fig.tight_layout(rect=[0, 0, 1, 0.96])
     return fig
 
+def fig_day_of_week_averages(df_wide: pd.DataFrame, player_cols: List[str]):
+    """
+    Average per player by day of week (Mon..Sun). Includes 8s.
+    """
+    if df_wide.empty:
+        return None
+    temp = df_wide.copy()
+    temp["DayOfWeek"] = temp.index.day_name()
+    # Preserve order Monday..Sunday
+    order = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+    temp["DayOfWeek"] = pd.Categorical(temp["DayOfWeek"], categories=order, ordered=True)
+    # Melt to long for seaborn
+    long = temp[player_cols + ["DayOfWeek"]].melt(id_vars=["DayOfWeek"], var_name="Player", value_name="Score")
+    grp = long.groupby(["DayOfWeek", "Player"], observed=True)["Score"].mean().reset_index()
+    fig, ax = plt.subplots(figsize=(14, 7))
+    sns.lineplot(data=grp, x="DayOfWeek", y="Score", hue="Player", ax=ax, marker="o")
+    ax.set_title("Average Score by Day of Week (includes 8s; lower is better)")
+    ax.set_xlabel("Day of Week")
+    ax.set_ylabel("Average Score")
+    ax.grid(True, linestyle="--", alpha=0.5)
+    ax.legend(title="Player", loc="upper left", bbox_to_anchor=(1.02, 1), borderaxespad=0.)
+    fig.tight_layout()
+    return fig
+
+def compute_weekly_winners(df_wide: pd.DataFrame, player_cols: List[str]):
+    """
+    Weekly winners Mon→Sun. Returns:
+      - winners_count: Series of total wins per player
+      - last_full_week_winners: list of names who won the most recent completed Sun-ended week
+    """
+    if df_wide.empty:
+        return pd.Series(dtype=int), []
+
+    # Resample to weeks ending Sunday (W-SUN), summing scores within the week
+    weekly = df_wide[player_cols].resample("W-SUN").sum(min_count=1)
+
+    if weekly.empty:
+        return pd.Series(dtype=int), []
+
+    # Drop the last row if it's not a completed week for the dataset (i.e., if last date is before the bin end)
+    max_date = df_wide.index.max().normalize()
+    # The last week in 'weekly' ends on its index date (Sunday). Keep only weeks whose end <= last Sunday <= max_date's Sunday?
+    # A simpler approach: drop the last weekly row if its end date is greater than max_date
+    if weekly.index[-1] > max_date:
+        weekly = weekly.iloc[:-1]
+
+    if weekly.empty:
+        return pd.Series(dtype=int), []
+
+    # For each week, find the min score; ties allowed
+    weekly_min = weekly.min(axis=1)
+    winners_per_week = []
+    for idx, min_val in weekly_min.items():
+        winners = weekly.columns[(weekly.loc[idx] == min_val)].tolist()
+        winners_per_week.append(winners)
+
+    # Count total wins per player (ties count as a win for each)
+    all_winners_flat = [p for winners in winners_per_week for p in winners]
+    winners_count = pd.Series(all_winners_flat).value_counts().sort_values(ascending=False)
+
+    # Most recent completed full week winners
+    last_full_week_winners = winners_per_week[-1] if winners_per_week else []
+
+    return winners_count, last_full_week_winners
+
 # ---------------- UI: Upload + Individuals first ----------------
 uploaded = st.file_uploader("Upload your WhatsApp export (_chat.txt)", type=["txt"])
 date_format = st.radio("Date format in your chat", ["dd/mm/yyyy", "mm/dd/yyyy"], horizontal=True)
@@ -160,10 +225,22 @@ if uploaded:
     with st.expander("Preview parsed entries"):
         st.dataframe(tidy.head(50), use_container_width=True)
 
-    # Build Individuals wide frame (8 = missed day)
+    # Build Individuals wide frame
     df_wide, player_cols = build_individuals_wide(tidy)
 
-    # -------- Individuals Section (Overall leader first) --------
+    # Date range selector (applies to all Individual charts)
+    min_d = df_wide.index.min().date()
+    max_d = df_wide.index.max().date()
+    dr = st.date_input("Select date range for charts", value=(min_d, max_d), min_value=min_d, max_value=max_d)
+    if isinstance(dr, tuple):
+        start_d, end_d = dr
+    else:
+        # If user picks a single date, treat as [date, date]
+        start_d, end_d = dr, dr
+
+    df_range = filter_by_date_range(df_wide, start_d, end_d)
+
+    # -------- Individuals --------
     st.header("Individuals")
 
     tabs = st.tabs([
@@ -171,25 +248,61 @@ if uploaded:
         "All-time averages",
         "Rolling 28-day averages",
         "Score distributions",
+        "Day-of-week averages",
+        "Weekly winners",
     ])
 
     with tabs[0]:
-        fig_leader, leader_name, leader_value = fig_overall_leader_cumulative(df_wide, player_cols)
-        c1, c2 = st.columns(2)
-        with c1:
-            st.metric("Current Leader (lowest total)", leader_name)
-        with c2:
-            st.metric("Current Best Cumulative Score", f"{leader_value:.0f}")
-        st.pyplot(fig_leader, clear_figure=True)
+        fig_leader, leader_name, leader_value, cum_totals_sorted = fig_overall_leader_cumulative(df_range, player_cols)
+        if fig_leader is None:
+            st.warning("No data in selected date range.")
+        else:
+            c1, c2 = st.columns(2)
+            with c1:
+                st.metric("Current Leader (lowest total)", leader_name)
+            with c2:
+                st.metric("Current Best Cumulative Score", f"{leader_value:.0f}")
+            st.pyplot(fig_leader, clear_figure=True)
+
+            # Show the rest of the players’ totals in ascending order, excluding the leader
+            others = cum_totals_sorted.drop(labels=[leader_name]) if leader_name in cum_totals_sorted.index else cum_totals_sorted
+            if not others.empty:
+                lines = [f"- **{name}** — {int(val)}" for name, val in others.items()]
+                st.markdown("<div style='font-size:0.9rem'>Other cumulative totals:</div>", unsafe_allow_html=True)
+                st.markdown("\n".join(lines), unsafe_allow_html=True)
 
     with tabs[1]:
-        st.pyplot(fig_all_time_player_average(df_wide, player_cols), clear_figure=True)
+        fig = fig_all_time_player_average(df_range, player_cols)
+        st.pyplot(fig, clear_figure=True) if fig else st.warning("No data in selected date range.")
 
     with tabs[2]:
-        st.pyplot(fig_rolling_28_day_average(df_wide, player_cols), clear_figure=True)
+        fig = fig_rolling_28_day_average(df_range, player_cols)
+        st.pyplot(fig, clear_figure=True) if fig else st.warning("No data in selected date range.")
 
     with tabs[3]:
-        st.pyplot(fig_score_distributions(df_wide, player_cols), clear_figure=True)
+        fig = fig_score_distributions(df_range, player_cols)
+        st.pyplot(fig, clear_figure=True) if fig else st.warning("No data in selected date range.")
+
+    with tabs[4]:
+        fig = fig_day_of_week_averages(df_range, player_cols)
+        st.pyplot(fig, clear_figure=True) if fig else st.warning("No data in selected date range.")
+
+    with tabs[5]:
+        winners_count, last_full_week_winners = compute_weekly_winners(df_range, player_cols)
+        if winners_count.empty:
+            st.warning("Not enough data to compute weekly winners in the selected date range.")
+        else:
+            # Most recent completed week winners
+            st.metric("Most recent full-week winner(s)", ", ".join(last_full_week_winners))
+            # Bar chart of total weekly wins per player
+            fig, ax = plt.subplots(figsize=(12, 6))
+            sns.barplot(x=winners_count.index, y=winners_count.values, ax=ax)
+            ax.set_title("Weekly Winners (count of Monday→Sunday wins)")
+            ax.set_xlabel("Player")
+            ax.set_ylabel("Weeks Won")
+            ax.tick_params(axis="x", rotation=45)
+            ax.grid(axis="y", linestyle="--", alpha=0.5)
+            st.pyplot(fig, clear_figure=True)
 
     # Downloads
     dl_col1, dl_col2 = st.columns(2)
@@ -251,6 +364,16 @@ if uploaded:
                 ax.set_ylabel("Wins")
                 ax.grid(True, linestyle="--", alpha=0.5)
                 st.pyplot(fig, clear_figure=True)
+
+    # ----- Scoring details at bottom -----
+    st.markdown("### Scoring details")
+    st.markdown(
+        "- **X/6** counts as **7**.\n"
+        "- If a player doesn’t post on a day, that day is recorded as **8** for them.\n"
+        "- **Lower is better** across all charts.\n"
+        "- **Overall leader** uses the **cumulative sum** over time.\n"
+        "- **Rolling 28-day average** and other averages include 8s."
+    )
 
 else:
     st.info("Upload your `_chat.txt` export to begin.")
