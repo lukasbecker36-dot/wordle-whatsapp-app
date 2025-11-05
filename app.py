@@ -1,5 +1,5 @@
 import re
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
 from typing import List, Tuple
 
 import pandas as pd
@@ -7,17 +7,120 @@ import streamlit as st
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-# ---------------- Streamlit page config ----------------
+# =======================================================
+# Page config
+# =======================================================
 st.set_page_config(page_title="Wordle Stats", page_icon="🟩", layout="wide")
-st.title("Wordle WhatsApp Analyzer 🟩🟨⬛")
 
-# Top privacy note
-st.success(
-    "Privacy: Your file is processed in memory for this session only. "
-    "We don’t persist or store your data on a database; nothing is kept between sessions."
+# --- Global CSS (dark Wordle look) ---
+CUSTOM_CSS = """
+<style>
+/* Inter font */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+html, body, [class*="css"] { font-family: 'Inter', sans-serif !important; }
+
+:root {
+  --bg: #0E1117;
+  --bg-2: #1B1F2A;
+  --text: #E3E6EC;
+  --muted: rgba(227,230,236,0.75);
+  --border: rgba(255,255,255,0.06);
+  --accent: #6AAA64; /* Wordle green */
+  --accent-2: #B59F3B; /* Wordle yellow */
+  --accent-3: #3A3A3C; /* Wordle gray */
+}
+
+body { color: var(--text); }
+.block-container { max-width: 1200px; padding-top: 1rem; }
+
+/* Headings */
+h1, h2, h3 { letter-spacing: 0.2px; }
+
+/* Hero row */
+.hero {
+  display: flex; gap: 16px; align-items: center;
+  background: var(--bg-2); border: 1px solid var(--border);
+  border-radius: 16px; padding: 14px 16px; margin-bottom: 12px;
+}
+.hero .title { font-size: 1.25rem; font-weight: 600; }
+.hero .subtitle { color: var(--muted); }
+
+/* Success note */
+.stAlert { border-radius: 12px; }
+
+/* Buttons */
+.stButton>button {
+  border-radius: 10px;
+  padding: 0.6rem 1rem;
+  border: 1px solid var(--border);
+  box-shadow: 0 2px 12px rgba(0,0,0,0.25);
+}
+.stButton>button:hover { transform: translateY(-1px); }
+
+/* Tabs */
+.stTabs [data-baseweb="tab-list"] { gap: 6px; }
+.stTabs [data-baseweb="tab"] {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-bottom: none;
+  border-radius: 10px 10px 0 0;
+  padding: 8px 14px;
+}
+
+/* Metric cards */
+[data-testid="stMetric"] {
+  background: rgba(255,255,255,0.04);
+  border-radius: 14px;
+  padding: 14px;
+  border: 1px solid var(--border);
+}
+
+/* File uploader tweak */
+[data-testid="stFileUploader"] {
+  background: var(--bg-2);
+  border: 1px dashed var(--border);
+  border-radius: 12px; padding: 10px 12px;
+}
+
+/* Date row alignment */
+.date-row { margin-top: 6px; }
+</style>
+"""
+st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
+
+# --- Seaborn theme & palette ---
+sns.set_theme(
+    style="whitegrid",
+    rc={"axes.edgecolor": "0.15", "axes.grid": True, "grid.linestyle": "--", "grid.alpha": 0.35},
+)
+WORDLE_PALETTE = ["#6AAA64", "#B59F3B", "#3A3A3C", "#538D4E", "#C9B458", "#787C7E"]
+sns.set_palette(WORDLE_PALETTE)
+
+# =======================================================
+# Hero + build stamp + privacy note
+# =======================================================
+st.markdown(
+    """
+<div class="hero">
+  <div>
+    <div class="title">Wordle Stats</div>
+    <div class="subtitle">Upload your WhatsApp export and explore individual & team performance.</div>
+  </div>
+</div>
+""",
+    unsafe_allow_html=True,
 )
 
-# ---------------- Parsing ----------------
+st.caption(f"Build: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} UTC")
+
+st.success(
+    "Privacy: Your file is processed in memory for this session only. "
+    "We don’t persist or store your data—nothing is kept between sessions."
+)
+
+# =======================================================
+# Parsing / data helpers
+# =======================================================
 def parse_chat(text: str, date_locale: str = "dd/mm/yyyy") -> pd.DataFrame:
     text = (text.replace("\u202f", " ")
                 .replace("\u200e", "")
@@ -63,10 +166,10 @@ def filter_by_date_range(df_wide: pd.DataFrame, start: date, end: date) -> pd.Da
     end_ts = pd.to_datetime(end)
     return df_wide[(df_wide.index >= start_ts) & (df_wide.index <= end_ts)]
 
-
-# ---------------- Plot helpers ----------------
+# =======================================================
+# Plot helpers
+# =======================================================
 def compute_cumsum(df_wide: pd.DataFrame, player_cols: List[str]) -> Tuple[pd.DataFrame, pd.Series, str, float]:
-    """Compute cumulative sum time series and latest totals/leader for the given df."""
     if df_wide.empty:
         return pd.DataFrame(), pd.Series(dtype=float), "—", float("nan")
     cumsum = df_wide[player_cols].cumsum()
@@ -78,10 +181,9 @@ def compute_cumsum(df_wide: pd.DataFrame, player_cols: List[str]) -> Tuple[pd.Da
 
 def plot_cumsum(cumsum: pd.DataFrame) -> plt.Figure:
     fig, ax = plt.subplots(figsize=(14, 7))
-    sns.lineplot(data=cumsum, ax=ax, linewidth=1.6)
+    sns.lineplot(data=cumsum, ax=ax, linewidth=1.8)
     ax.set_title("Overall Leader — Cumulative Score per Player Over Time (lower is better)")
-    ax.set_xlabel("Date")
-    ax.set_ylabel("Cumulative Score (sum)")
+    ax.set_xlabel("Date"); ax.set_ylabel("Cumulative Score")
     ax.grid(True, linestyle="--", alpha=0.5)
     ax.legend(title="Player", loc="upper left", bbox_to_anchor=(1.02, 1), borderaxespad=0.)
     fig.tight_layout()
@@ -95,10 +197,10 @@ def fig_all_time_player_average(df_wide: pd.DataFrame, player_cols: List[str]):
     fig, ax = plt.subplots(figsize=(12, 6))
     sns.barplot(x=avgs.index, y=avgs.values, ax=ax)
     ax.set_title("All-time Player Average (includes 8s; lower is better)")
-    ax.set_xlabel("Player")
-    ax.set_ylabel("Average Score")
+    ax.set_xlabel("Player"); ax.set_ylabel("Average Score")
     ax.tick_params(axis="x", rotation=45)
     ax.grid(axis="y", linestyle="--", alpha=0.5)
+    fig.tight_layout()
     return fig
 
 
@@ -110,10 +212,9 @@ def compute_rolling28(df_wide: pd.DataFrame, player_cols: List[str]) -> pd.DataF
 
 def plot_rolling28(rolling: pd.DataFrame) -> plt.Figure:
     fig, ax = plt.subplots(figsize=(14, 7))
-    sns.lineplot(data=rolling, ax=ax, linewidth=1.6)
+    sns.lineplot(data=rolling, ax=ax, linewidth=1.8)
     ax.set_title("Rolling 28-Day Player Average")
-    ax.set_xlabel("Date")
-    ax.set_ylabel("Rolling Avg (28d)")
+    ax.set_xlabel("Date"); ax.set_ylabel("Rolling Avg (28d)")
     ax.grid(True, linestyle="--", alpha=0.5)
     ax.legend(title="Player", loc="upper left", bbox_to_anchor=(1.02, 1), borderaxespad=0.)
     fig.tight_layout()
@@ -165,8 +266,7 @@ def fig_day_of_week_averages(df_wide: pd.DataFrame, player_cols: List[str]):
     fig, ax = plt.subplots(figsize=(14, 7))
     sns.lineplot(data=grp, x="DayOfWeek", y="Score", hue="Player", ax=ax, marker="o")
     ax.set_title("Average Score by Day of Week (includes 8s; lower is better)")
-    ax.set_xlabel("Day of Week")
-    ax.set_ylabel("Average Score")
+    ax.set_xlabel("Day of Week"); ax.set_ylabel("Average Score")
     ax.grid(True, linestyle="--", alpha=0.5)
     ax.legend(title="Player", loc="upper left", bbox_to_anchor=(1.02, 1), borderaxespad=0.)
     fig.tight_layout()
@@ -186,16 +286,17 @@ def compute_weekly_winners(df_wide: pd.DataFrame, player_cols: List[str]):
         return pd.Series(dtype=int), []
     weekly_min = weekly.min(axis=1)
     winners_per_week = []
-    for idx, min_val in weekly_min.items():
-        winners = weekly.columns[(weekly.loc[idx] == min_val)].tolist()
+    for idx, _ in weekly_min.items():
+        winners = weekly.columns[(weekly.loc[idx] == weekly_min.loc[idx])].tolist()
         winners_per_week.append(winners)
     all_winners_flat = [p for winners in winners_per_week for p in winners]
     winners_count = pd.Series(all_winners_flat).value_counts().sort_values(ascending=False)
     last_full_week_winners = winners_per_week[-1] if winners_per_week else []
     return winners_count, last_full_week_winners
 
-
-# ---------------- UI ----------------
+# =======================================================
+# UI
+# =======================================================
 uploaded = st.file_uploader("Upload your WhatsApp export (_chat.txt)", type=["txt"])
 date_format = st.radio("Date format in your chat", ["dd/mm/yyyy", "mm/dd/yyyy"], horizontal=True)
 
@@ -207,14 +308,19 @@ if uploaded:
         st.warning("No Wordle lines found. Make sure your export contains lines like 'Wordle #### 3/6'.")
         st.stop()
 
-    st.success(f"Parsed {tidy['Date'].nunique()} days, {tidy['Name'].nunique()} players, {len(tidy)} entries.")
+    # Top metrics
+    m1, m2, m3 = st.columns(3)
+    with m1: st.metric("Days parsed", tidy['Date'].nunique())
+    with m2: st.metric("Players", tidy['Name'].nunique())
+    with m3: st.metric("Total entries", len(tidy))
+
     with st.expander("Preview parsed entries"):
         st.dataframe(tidy.head(50), use_container_width=True)
 
-    # Build Individuals wide frame
+    # Build wide
     df_wide, player_cols = build_individuals_wide(tidy)
 
-    # --- Date range selector with Reset button (UK format, aligned) ---
+    # --- Date range controls (UK format + reset, aligned) ---
     min_d = df_wide.index.min().date()
     max_d = df_wide.index.max().date()
 
@@ -234,7 +340,6 @@ if uploaded:
             format="DD/MM/YYYY",
             label_visibility="collapsed",
         )
-
     with col_reset:
         st.write("")  # spacer for alignment
         if st.button("Reset", use_container_width=True, help="Reset to full available date range"):
@@ -267,25 +372,23 @@ if uploaded:
     st.header("Individuals")
 
     tabs = st.tabs([
-        "Overall leader",
-        "All-time averages",
-        "Rolling 28-day averages",
-        "Score distributions",
-        "Day-of-week averages",
-        "Weekly winners",
+        "Overall leader 🏆",
+        "All-time averages 📊",
+        "Rolling 28-day 📈",
+        "Score distributions 📦",
+        "By weekday 📅",
+        "Weekly winners 🥇",
     ])
 
-    # --- Overall leader ---
+    # Overall leader
     with tabs[0]:
         cumsum_full, latest_sorted, leader_name, leader_value = compute_cumsum(df_range, player_cols)
         if cumsum_full.empty:
             st.warning("No data in selected date range.")
         else:
             c1, c2 = st.columns(2)
-            with c1:
-                st.metric("Current Leader (lowest total)", leader_name)
-            with c2:
-                st.metric("Current Best Cumulative Score", f"{leader_value:.0f}")
+            with c1: st.metric("Current leader (lowest total)", leader_name)
+            with c2: st.metric("Best cumulative score", f"{leader_value:.0f}")
 
             others = latest_sorted.drop(labels=[leader_name]) if leader_name in latest_sorted.index else latest_sorted
             if not others.empty:
@@ -293,11 +396,9 @@ if uploaded:
                 st.markdown("<div style='font-size:0.9rem'>Other cumulative totals:</div>", unsafe_allow_html=True)
                 st.markdown("\n".join(lines), unsafe_allow_html=True)
 
-            bcol1, bcol2 = st.columns([1, 1])
-            with bcol1:
-                last30 = st.button("Last 30 days view", key="leader_last30")
-            with bcol2:
-                fullview = st.button("Full view", key="leader_fullview")
+            b1, b2 = st.columns([1, 1])
+            with b1: last30 = st.button("Last 30 days view")
+            with b2: fullview = st.button("Full view")
 
             cumsum_plot = cumsum_full
             if last30 and not cumsum_full.empty:
@@ -309,17 +410,20 @@ if uploaded:
             fig = plot_cumsum(cumsum_plot)
             st.pyplot(fig, clear_figure=True)
 
-    # --- Rolling 28-day averages ---
+    # All-time averages
+    with tabs[1]:
+        fig = fig_all_time_player_average(df_range, player_cols)
+        st.pyplot(fig, clear_figure=True)
+
+    # Rolling 28-day
     with tabs[2]:
         rolling_full = compute_rolling28(df_range, player_cols)
         if rolling_full.empty:
             st.warning("No data in selected date range.")
         else:
-            bcol1, bcol2 = st.columns([1, 1])
-            with bcol1:
-                last30 = st.button("Last 30 days view", key="roll_last30")
-            with bcol2:
-                fullview = st.button("Full view", key="roll_fullview")
+            b1, b2 = st.columns([1, 1])
+            with b1: last30 = st.button("Last 30 days view", key="roll30")
+            with b2: fullview = st.button("Full view", key="rollfull")
 
             rolling_plot = rolling_full
             if last30 and not rolling_full.empty:
@@ -331,22 +435,17 @@ if uploaded:
             fig = plot_rolling28(rolling_plot)
             st.pyplot(fig, clear_figure=True)
 
-    # --- All-time averages ---
-    with tabs[1]:
-        fig = fig_all_time_player_average(df_range, player_cols)
-        st.pyplot(fig, clear_figure=True)
-
-    # --- Score distributions ---
+    # Distributions
     with tabs[3]:
         fig = fig_score_distributions(df_range, player_cols)
         st.pyplot(fig, clear_figure=True)
 
-    # --- Day-of-week averages ---
+    # By weekday
     with tabs[4]:
         fig = fig_day_of_week_averages(df_range, player_cols)
         st.pyplot(fig, clear_figure=True)
 
-    # --- Weekly winners ---
+    # Weekly winners
     with tabs[5]:
         winners_count, last_full_week_winners = compute_weekly_winners(df_range, player_cols)
         if winners_count.empty:
@@ -356,15 +455,13 @@ if uploaded:
             fig, ax = plt.subplots(figsize=(12, 6))
             sns.barplot(x=winners_count.index, y=winners_count.values, ax=ax)
             ax.set_title("Weekly Winners (count of Monday→Sunday wins)")
-            ax.set_xlabel("Player")
-            ax.set_ylabel("Weeks Won")
+            ax.set_xlabel("Player"); ax.set_ylabel("Weeks Won")
             ax.tick_params(axis="x", rotation=45)
             ax.grid(axis="y", linestyle="--", alpha=0.5)
             st.pyplot(fig, clear_figure=True)
 
     # -------- Teams --------
     st.header("Teams")
-
     players = sorted(tidy["Name"].unique().tolist())
     cA, cB = st.columns(2)
     with cA:
@@ -387,10 +484,9 @@ if uploaded:
         t_tabs = st.tabs(["Team totals over time", "Cumulative wins"])
         with t_tabs[0]:
             fig, ax = plt.subplots(figsize=(10, 5))
-            sns.lineplot(data=df_teams[[f"{team_a_label} Total", f"{team_b_label} Total"]], ax=ax)
+            sns.lineplot(data=df_teams[[f"{team_a_label} Total", f"{team_b_label} Total"]], ax=ax, linewidth=1.8)
             ax.set_title("Daily Team Totals")
-            ax.set_xlabel("Date")
-            ax.set_ylabel("Total Score")
+            ax.set_xlabel("Date"); ax.set_ylabel("Total Score")
             ax.grid(True, linestyle="--", alpha=0.5)
             st.pyplot(fig, clear_figure=True)
 
@@ -399,11 +495,11 @@ if uploaded:
             sns.lineplot(
                 data=df_teams[[f"{team_a_label} Wins", f"{team_b_label} Wins"]],
                 drawstyle="steps-post",
-                ax=ax
+                ax=ax,
+                linewidth=1.8
             )
             ax.set_title("Cumulative Team Wins")
-            ax.set_xlabel("Date")
-            ax.set_ylabel("Wins")
+            ax.set_xlabel("Date"); ax.set_ylabel("Wins")
             ax.grid(True, linestyle="--", alpha=0.5)
             st.pyplot(fig, clear_figure=True)
     else:
