@@ -63,6 +63,7 @@ def filter_by_date_range(df_wide: pd.DataFrame, start: date, end: date) -> pd.Da
 
 # ---------------- Plot helpers ----------------
 def fig_overall_leader_cumulative(df_wide: pd.DataFrame, player_cols: List[str]):
+    """Cumulative **sum** over time for all players. Lower is better."""
     if df_wide.empty:
         return None, "—", float("nan"), pd.Series(dtype=float)
 
@@ -200,17 +201,28 @@ if uploaded:
     # Build Individuals wide frame
     df_wide, player_cols = build_individuals_wide(tidy)
 
-    # --- Date range selector (safe version) ---
+    # --- Date range selector with Reset button ---
     min_d = df_wide.index.min().date()
     max_d = df_wide.index.max().date()
 
-    dr_val = st.date_input(
-        "Select date range for charts",
-        value=(min_d, max_d),
-        min_value=min_d,
-        max_value=max_d,
-    )
+    if "date_range" not in st.session_state:
+        st.session_state["date_range"] = (min_d, max_d)
 
+    col_date, col_reset = st.columns([4, 1])
+    with col_date:
+        dr_val = st.date_input(
+            "Select date range for charts",
+            value=st.session_state["date_range"],
+            min_value=min_d,
+            max_value=max_d,
+            key="date_input_widget",
+        )
+    with col_reset:
+        if st.button("Reset", help="Reset to full available date range"):
+            st.session_state["date_range"] = (min_d, max_d)
+            dr_val = st.session_state["date_range"]
+
+    # Normalize the date_input output
     def _normalize_date_input(val, fallback_start, fallback_end):
         if isinstance(val, (list, tuple)):
             if len(val) == 2:
@@ -230,6 +242,9 @@ if uploaded:
     if start_d > end_d:
         start_d, end_d = end_d, start_d
 
+    # Store back to session (so Reset works and state persists)
+    st.session_state["date_range"] = (start_d, end_d)
+
     df_range = filter_by_date_range(df_wide, start_d, end_d)
 
     # -------- Individuals --------
@@ -244,6 +259,7 @@ if uploaded:
         "Weekly winners",
     ])
 
+    # --- Overall leader ---
     with tabs[0]:
         fig_leader, leader_name, leader_value, cum_totals_sorted = fig_overall_leader_cumulative(df_range, player_cols)
         if fig_leader is None:
@@ -254,30 +270,49 @@ if uploaded:
                 st.metric("Current Leader (lowest total)", leader_name)
             with c2:
                 st.metric("Current Best Cumulative Score", f"{leader_value:.0f}")
-            st.pyplot(fig_leader, clear_figure=True)
 
+            # Other players (ascending) listed ABOVE chart
             others = cum_totals_sorted.drop(labels=[leader_name]) if leader_name in cum_totals_sorted.index else cum_totals_sorted
             if not others.empty:
                 lines = [f"- **{name}** — {int(val)}" for name, val in others.items()]
                 st.markdown("<div style='font-size:0.9rem'>Other cumulative totals:</div>", unsafe_allow_html=True)
                 st.markdown("\n".join(lines), unsafe_allow_html=True)
 
+            st.pyplot(fig_leader, clear_figure=True)
+
+    # --- All-time averages ---
     with tabs[1]:
         fig = fig_all_time_player_average(df_range, player_cols)
-        st.pyplot(fig, clear_figure=True) if fig else st.warning("No data in selected date range.")
+        if fig:
+            st.pyplot(fig, clear_figure=True)
+        else:
+            st.warning("No data in selected date range.")
 
+    # --- Rolling 28-day averages ---
     with tabs[2]:
         fig = fig_rolling_28_day_average(df_range, player_cols)
-        st.pyplot(fig, clear_figure=True) if fig else st.warning("No data in selected date range.")
+        if fig:
+            st.pyplot(fig, clear_figure=True)
+        else:
+            st.warning("No data in selected date range.")
 
+    # --- Score distributions ---
     with tabs[3]:
         fig = fig_score_distributions(df_range, player_cols)
-        st.pyplot(fig, clear_figure=True) if fig else st.warning("No data in selected date range.")
+        if fig:
+            st.pyplot(fig, clear_figure=True)
+        else:
+            st.warning("No data in selected date range.")
 
+    # --- Day-of-week averages ---
     with tabs[4]:
         fig = fig_day_of_week_averages(df_range, player_cols)
-        st.pyplot(fig, clear_figure=True) if fig else st.warning("No data in selected date range.")
+        if fig:
+            st.pyplot(fig, clear_figure=True)
+        else:
+            st.warning("No data in selected date range.")
 
+    # --- Weekly winners ---
     with tabs[5]:
         winners_count, last_full_week_winners = compute_weekly_winners(df_range, player_cols)
         if winners_count.empty:
