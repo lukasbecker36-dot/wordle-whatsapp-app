@@ -47,6 +47,7 @@ def parse_chat(text: str, date_locale: str = "dd/mm/yyyy") -> pd.DataFrame:
         df = df.sort_values(["Date", "Name"]).reset_index(drop=True)
     return df
 
+
 def build_individuals_wide(tidy_df: pd.DataFrame) -> Tuple[pd.DataFrame, List[str]]:
     pivot = tidy_df.pivot_table(index="Date", columns="Name", values="Score", aggfunc="first")
     pivot.index = pd.to_datetime(pivot.index)
@@ -54,12 +55,14 @@ def build_individuals_wide(tidy_df: pd.DataFrame) -> Tuple[pd.DataFrame, List[st
     pivot = pivot.fillna(8)  # 8 = missed day
     return pivot, list(pivot.columns)
 
+
 def filter_by_date_range(df_wide: pd.DataFrame, start: date, end: date) -> pd.DataFrame:
     if df_wide.empty:
         return df_wide
     start_ts = pd.to_datetime(start)
     end_ts = pd.to_datetime(end)
     return df_wide[(df_wide.index >= start_ts) & (df_wide.index <= end_ts)]
+
 
 # ---------------- Plot helpers ----------------
 def compute_cumsum(df_wide: pd.DataFrame, player_cols: List[str]) -> Tuple[pd.DataFrame, pd.Series, str, float]:
@@ -72,6 +75,7 @@ def compute_cumsum(df_wide: pd.DataFrame, player_cols: List[str]) -> Tuple[pd.Da
     leader_value = float(latest.min())
     return cumsum, latest.sort_values(), leader_name, leader_value
 
+
 def plot_cumsum(cumsum: pd.DataFrame) -> plt.Figure:
     fig, ax = plt.subplots(figsize=(14, 7))
     sns.lineplot(data=cumsum, ax=ax, linewidth=1.6)
@@ -82,6 +86,7 @@ def plot_cumsum(cumsum: pd.DataFrame) -> plt.Figure:
     ax.legend(title="Player", loc="upper left", bbox_to_anchor=(1.02, 1), borderaxespad=0.)
     fig.tight_layout()
     return fig
+
 
 def fig_all_time_player_average(df_wide: pd.DataFrame, player_cols: List[str]):
     if df_wide.empty:
@@ -96,10 +101,12 @@ def fig_all_time_player_average(df_wide: pd.DataFrame, player_cols: List[str]):
     ax.grid(axis="y", linestyle="--", alpha=0.5)
     return fig
 
+
 def compute_rolling28(df_wide: pd.DataFrame, player_cols: List[str]) -> pd.DataFrame:
     if df_wide.empty:
         return pd.DataFrame()
     return df_wide[player_cols].rolling(window=28, min_periods=1).mean()
+
 
 def plot_rolling28(rolling: pd.DataFrame) -> plt.Figure:
     fig, ax = plt.subplots(figsize=(14, 7))
@@ -112,11 +119,11 @@ def plot_rolling28(rolling: pd.DataFrame) -> plt.Figure:
     fig.tight_layout()
     return fig
 
+
 def fig_score_distributions(df_wide: pd.DataFrame, player_cols: List[str]):
     if df_wide.empty:
         return None
     data = df_wide[player_cols].replace(8, pd.NA)
-
     n = len(player_cols)
     cols = min(4, n if n > 0 else 1)
     rows = (n + cols - 1) // cols if n else 1
@@ -145,6 +152,7 @@ def fig_score_distributions(df_wide: pd.DataFrame, player_cols: List[str]):
     fig.tight_layout(rect=[0, 0, 1, 0.96])
     return fig
 
+
 def fig_day_of_week_averages(df_wide: pd.DataFrame, player_cols: List[str]):
     if df_wide.empty:
         return None
@@ -163,6 +171,7 @@ def fig_day_of_week_averages(df_wide: pd.DataFrame, player_cols: List[str]):
     ax.legend(title="Player", loc="upper left", bbox_to_anchor=(1.02, 1), borderaxespad=0.)
     fig.tight_layout()
     return fig
+
 
 def compute_weekly_winners(df_wide: pd.DataFrame, player_cols: List[str]):
     if df_wide.empty:
@@ -185,6 +194,7 @@ def compute_weekly_winners(df_wide: pd.DataFrame, player_cols: List[str]):
     last_full_week_winners = winners_per_week[-1] if winners_per_week else []
     return winners_count, last_full_week_winners
 
+
 # ---------------- UI ----------------
 uploaded = st.file_uploader("Upload your WhatsApp export (_chat.txt)", type=["txt"])
 date_format = st.radio("Date format in your chat", ["dd/mm/yyyy", "mm/dd/yyyy"], horizontal=True)
@@ -204,29 +214,33 @@ if uploaded:
     # Build Individuals wide frame
     df_wide, player_cols = build_individuals_wide(tidy)
 
-    # --- Date range selector with Reset button (UK format) ---
+    # --- Date range selector with Reset button (UK format, aligned) ---
     min_d = df_wide.index.min().date()
     max_d = df_wide.index.max().date()
 
     if "date_range" not in st.session_state:
         st.session_state["date_range"] = (min_d, max_d)
 
-    col_date, col_reset = st.columns([4, 1])
+    st.markdown("**Select date range for charts — calculate scores based on this period only**")
+    col_date, col_reset = st.columns([4, 1], vertical_alignment="center")
+
     with col_date:
         dr_val = st.date_input(
-            "Select date range for charts — calculate scores based on this period only",
+            label="Date range",
             value=st.session_state["date_range"],
             min_value=min_d,
             max_value=max_d,
             key="date_input_widget",
-            format="DD/MM/YYYY",  # UK-style display
+            format="DD/MM/YYYY",
+            label_visibility="collapsed",
         )
-    with col_reset:
-        if st.button("Reset", help="Reset to full available date range"):
-            st.session_state["date_range"] = (min_d, max_d)
-            dr_val = st.session_state["date_range"]
 
-    # Normalize the date_input output
+    with col_reset:
+        st.write("")  # spacer for alignment
+        if st.button("Reset", use_container_width=True, help="Reset to full available date range"):
+            st.session_state["date_range"] = (min_d, max_d)
+            st.experimental_rerun()
+
     def _normalize_date_input(val, fallback_start, fallback_end):
         if isinstance(val, (list, tuple)):
             if len(val) == 2:
@@ -246,9 +260,7 @@ if uploaded:
     if start_d > end_d:
         start_d, end_d = end_d, start_d
 
-    # Store back to session (so Reset works and state persists)
     st.session_state["date_range"] = (start_d, end_d)
-
     df_range = filter_by_date_range(df_wide, start_d, end_d)
 
     # -------- Individuals --------
@@ -265,7 +277,6 @@ if uploaded:
 
     # --- Overall leader ---
     with tabs[0]:
-        # Compute once on the full selected range
         cumsum_full, latest_sorted, leader_name, leader_value = compute_cumsum(df_range, player_cols)
         if cumsum_full.empty:
             st.warning("No data in selected date range.")
@@ -276,27 +287,17 @@ if uploaded:
             with c2:
                 st.metric("Current Best Cumulative Score", f"{leader_value:.0f}")
 
-            # "Other" leaderboard above chart
             others = latest_sorted.drop(labels=[leader_name]) if leader_name in latest_sorted.index else latest_sorted
             if not others.empty:
                 lines = [f"- **{name}** — {int(val)}" for name, val in others.items()]
                 st.markdown("<div style='font-size:0.9rem'>Other cumulative totals:</div>", unsafe_allow_html=True)
                 st.markdown("\n".join(lines), unsafe_allow_html=True)
 
-            # Display-only window controls
             bcol1, bcol2 = st.columns([1, 1])
             with bcol1:
-                last30 = st.button(
-                    "Last 30 days view",
-                    key="leader_last30",
-                    help="Only trims the visible chart window; metrics still reflect the full selected range."
-                )
+                last30 = st.button("Last 30 days view", key="leader_last30")
             with bcol2:
-                fullview = st.button(
-                    "Full view",
-                    key="leader_fullview",
-                    help="Show the full selected date range in the chart."
-                )
+                fullview = st.button("Full view", key="leader_fullview")
 
             cumsum_plot = cumsum_full
             if last30 and not cumsum_full.empty:
@@ -306,21 +307,7 @@ if uploaded:
                 cumsum_plot = cumsum_full
 
             fig = plot_cumsum(cumsum_plot)
-            if fig:
-                st.pyplot(fig, clear_figure=True)
-            else:
-                st.warning("No data to plot.")
-
-    # --- All-time averages ---
-    with tabs[1]:
-        st.caption("Tip: This chart is not a time series; Last 30 days view does not apply.")
-        _ = st.button("Last 30 days view", key="avg_last30", disabled=True)
-        _ = st.button("Full view", key="avg_fullview", disabled=True)
-        fig = fig_all_time_player_average(df_range, player_cols)
-        if fig:
             st.pyplot(fig, clear_figure=True)
-        else:
-            st.warning("No data in selected date range.")
 
     # --- Rolling 28-day averages ---
     with tabs[2]:
@@ -330,17 +317,9 @@ if uploaded:
         else:
             bcol1, bcol2 = st.columns([1, 1])
             with bcol1:
-                last30 = st.button(
-                    "Last 30 days view",
-                    key="roll_last30",
-                    help="Only trims the visible chart window; averages are computed on the selected range."
-                )
+                last30 = st.button("Last 30 days view", key="roll_last30")
             with bcol2:
-                fullview = st.button(
-                    "Full view",
-                    key="roll_fullview",
-                    help="Show the full selected date range in the chart."
-                )
+                fullview = st.button("Full view", key="roll_fullview")
 
             rolling_plot = rolling_full
             if last30 and not rolling_full.empty:
@@ -350,38 +329,25 @@ if uploaded:
                 rolling_plot = rolling_full
 
             fig = plot_rolling28(rolling_plot)
-            if fig:
-                st.pyplot(fig, clear_figure=True)
-            else:
-                st.warning("No data to plot.")
+            st.pyplot(fig, clear_figure=True)
+
+    # --- All-time averages ---
+    with tabs[1]:
+        fig = fig_all_time_player_average(df_range, player_cols)
+        st.pyplot(fig, clear_figure=True)
 
     # --- Score distributions ---
     with tabs[3]:
-        st.caption("Tip: This chart is not a time series; Last 30 days view does not apply.")
-        _ = st.button("Last 30 days view", key="dist_last30", disabled=True)
-        _ = st.button("Full view", key="dist_fullview", disabled=True)
         fig = fig_score_distributions(df_range, player_cols)
-        if fig:
-            st.pyplot(fig, clear_figure=True)
-        else:
-            st.warning("No data in selected date range.")
+        st.pyplot(fig, clear_figure=True)
 
     # --- Day-of-week averages ---
     with tabs[4]:
-        st.caption("Tip: This is an aggregate by weekday; Last 30 days view does not apply.")
-        _ = st.button("Last 30 days view", key="dow_last30", disabled=True)
-        _ = st.button("Full view", key="dow_fullview", disabled=True)
         fig = fig_day_of_week_averages(df_range, player_cols)
-        if fig:
-            st.pyplot(fig, clear_figure=True)
-        else:
-            st.warning("No data in selected date range.")
+        st.pyplot(fig, clear_figure=True)
 
     # --- Weekly winners ---
     with tabs[5]:
-        st.caption("Tip: This ranking is weekly (Mon→Sun); Last 30 days view does not apply.")
-        _ = st.button("Last 30 days view", key="weekly_last30", disabled=True)
-        _ = st.button("Full view", key="weekly_fullview", disabled=True)
         winners_count, last_full_week_winners = compute_weekly_winners(df_range, player_cols)
         if winners_count.empty:
             st.warning("Not enough data to compute weekly winners in the selected date range.")
@@ -396,67 +362,6 @@ if uploaded:
             ax.grid(axis="y", linestyle="--", alpha=0.5)
             st.pyplot(fig, clear_figure=True)
 
-    # Downloads
-    dl_col1, dl_col2 = st.columns(2)
-    with dl_col1:
-        st.download_button(
-            "Download tidy CSV (Date, Name, Score)",
-            tidy.to_csv(index=False).encode("utf-8"),
-            "wordle_tidy.csv",
-            "text/csv"
-        )
-    with dl_col2:
-        st.download_button(
-            "Download daily wide CSV (players as columns)",
-            df_wide.reset_index().rename(columns={"index": "Date"}).to_csv(index=False).encode("utf-8"),
-            "wordle_daily_wide.csv",
-            "text/csv"
-        )
-
-    # -------- Teams --------
-    with st.expander("Team comparison (optional)"):
-        players = sorted(tidy["Name"].unique().tolist())
-        colA, colB = st.columns(2)
-        with colA:
-            team_a_label = st.text_input("Team A name", value="Boys")
-            team_a = st.multiselect(f"{team_a_label} members", players, key="teamA")
-        with colB:
-            team_b_label = st.text_input("Team B name", value="Girls")
-            team_b = st.multiselect(f"{team_b_label} members", players, key="teamB")
-
-        if team_a or team_b:
-            a_cols = [c for c in team_a if c in df_wide.columns]
-            b_cols = [c for c in team_b if c in df_wide.columns]
-
-            df_teams = df_wide.copy()
-            df_teams[f"{team_a_label} Total"] = df_teams[a_cols].sum(axis=1) if a_cols else 0
-            df_teams[f"{team_b_label} Total"] = df_teams[b_cols].sum(axis=1) if b_cols else 0
-            df_teams[f"{team_a_label} Wins"] = (df_teams[f"{team_a_label} Total"] < df_teams[f"{team_b_label} Total"]).astype(int).cumsum()
-            df_teams[f"{team_b_label} Wins"] = (df_teams[f"{team_b_label} Total"] < df_teams[f"{team_a_label} Total"]).astype(int).cumsum()
-
-            t_tabs = st.tabs(["Team totals over time", "Cumulative wins"])
-            with t_tabs[0]:
-                fig, ax = plt.subplots(figsize=(10, 5))
-                sns.lineplot(data=df_teams[[f"{team_a_label} Total", f"{team_b_label} Total"]], ax=ax)
-                ax.set_title("Daily Team Totals")
-                ax.set_xlabel("Date")
-                ax.set_ylabel("Total Score")
-                ax.grid(True, linestyle="--", alpha=0.5)
-                st.pyplot(fig, clear_figure=True)
-
-            with t_tabs[1]:
-                fig, ax = plt.subplots(figsize=(10, 5))
-                sns.lineplot(
-                    data=df_teams[[f"{team_a_label} Wins", f"{team_b_label} Wins"]],
-                    drawstyle="steps-post",
-                    ax=ax
-                )
-                ax.set_title("Cumulative Team Wins")
-                ax.set_xlabel("Date")
-                ax.set_ylabel("Wins")
-                ax.grid(True, linestyle="--", alpha=0.5)
-                st.pyplot(fig, clear_figure=True)
-
     # Scoring details
     st.markdown("### Scoring details")
     st.markdown(
@@ -464,8 +369,8 @@ if uploaded:
         "- If a player doesn’t post on a day, that day is recorded as **8**.\n"
         "- **Lower is better** across all charts.\n"
         "- **Overall leader** uses the **cumulative sum** over time.\n"
-        "- **Rolling 28-day average** and other averages include 8s.\n"
-	"- **Obviously this app is not affiliated with Wordle or the New York Times."
+        "- **Rolling 28-day average** and other averages include 8s."
+	"- Note: Obviously this app is not affiliated with Wordle or the New York Times."
     )
 
 else:
