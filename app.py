@@ -263,6 +263,23 @@ if uploaded:
     st.session_state["date_range"] = (start_d, end_d)
     df_range = filter_by_date_range(df_wide, start_d, end_d)
 
+    # === CSV Download: Daily Scores ===
+    with st.expander("Download daily scores (CSV)"):
+        daily_out = df_range.copy()
+        if not daily_out.empty:
+            daily_out = daily_out.reset_index().rename(columns={"index": "Date"})
+            daily_out["Date"] = daily_out["Date"].dt.strftime("%d/%m/%Y")  # UK style
+            csv_data = daily_out.to_csv(index=False).encode("utf-8")
+            st.download_button(
+                label="Download daily player scores",
+                data=csv_data,
+                file_name="daily_scores.csv",
+                mime="text/csv",
+                help="Each row is a date, each column is a player’s Wordle score (8 = no result that day)."
+            )
+        else:
+            st.info("No data in the selected date range to export.")
+
     # -------- Individuals --------
     st.header("Individuals")
 
@@ -362,52 +379,51 @@ if uploaded:
             ax.grid(axis="y", linestyle="--", alpha=0.5)
             st.pyplot(fig, clear_figure=True)
 
-    # -------- Teams --------
-    st.header("Teams")
+    # -------- Teams (collapsed/hidden by default) --------
+    with st.expander("Teams (optional)"):
+        players = sorted(tidy["Name"].unique().tolist())
+        cA, cB = st.columns(2)
+        with cA:
+            team_a_label = st.text_input("Team A name", value="Team A", key="teamA_label")
+            team_a = st.multiselect(f"{team_a_label} members", players, key="teamA_members")
+        with cB:
+            team_b_label = st.text_input("Team B name", value="Team B", key="teamB_label")
+            team_b = st.multiselect(f"{team_b_label} members", players, key="teamB_members")
 
-    players = sorted(tidy["Name"].unique().tolist())
-    cA, cB = st.columns(2)
-    with cA:
-        team_a_label = st.text_input("Team A name", value="Team A", key="teamA_label")
-        team_a = st.multiselect(f"{team_a_label} members", players, key="teamA_members")
-    with cB:
-        team_b_label = st.text_input("Team B name", value="Team B", key="teamB_label")
-        team_b = st.multiselect(f"{team_b_label} members", players, key="teamB_members")
+        if team_a or team_b:
+            a_cols = [c for c in team_a if c in df_range.columns]
+            b_cols = [c for c in team_b if c in df_range.columns]
 
-    if team_a or team_b:
-        a_cols = [c for c in team_a if c in df_range.columns]
-        b_cols = [c for c in team_b if c in df_range.columns]
+            df_teams = df_range.copy()
+            df_teams[f"{team_a_label} Total"] = df_teams[a_cols].sum(axis=1) if a_cols else 0
+            df_teams[f"{team_b_label} Total"] = df_teams[b_cols].sum(axis=1) if b_cols else 0
+            df_teams[f"{team_a_label} Wins"] = (df_teams[f"{team_a_label} Total"] < df_teams[f"{team_b_label} Total"]).astype(int).cumsum()
+            df_teams[f"{team_b_label} Wins"] = (df_teams[f"{team_b_label} Total"] < df_teams[f"{team_a_label} Total"]).astype(int).cumsum()
 
-        df_teams = df_range.copy()
-        df_teams[f"{team_a_label} Total"] = df_teams[a_cols].sum(axis=1) if a_cols else 0
-        df_teams[f"{team_b_label} Total"] = df_teams[b_cols].sum(axis=1) if b_cols else 0
-        df_teams[f"{team_a_label} Wins"] = (df_teams[f"{team_a_label} Total"] < df_teams[f"{team_b_label} Total"]).astype(int).cumsum()
-        df_teams[f"{team_b_label} Wins"] = (df_teams[f"{team_b_label} Total"] < df_teams[f"{team_a_label} Total"]).astype(int).cumsum()
+            t_tabs = st.tabs(["Team totals over time", "Cumulative wins"])
+            with t_tabs[0]:
+                fig, ax = plt.subplots(figsize=(10, 5))
+                sns.lineplot(data=df_teams[[f"{team_a_label} Total", f"{team_b_label} Total"]], ax=ax)
+                ax.set_title("Daily Team Totals")
+                ax.set_xlabel("Date")
+                ax.set_ylabel("Total Score")
+                ax.grid(True, linestyle="--", alpha=0.5)
+                st.pyplot(fig, clear_figure=True)
 
-        t_tabs = st.tabs(["Team totals over time", "Cumulative wins"])
-        with t_tabs[0]:
-            fig, ax = plt.subplots(figsize=(10, 5))
-            sns.lineplot(data=df_teams[[f"{team_a_label} Total", f"{team_b_label} Total"]], ax=ax)
-            ax.set_title("Daily Team Totals")
-            ax.set_xlabel("Date")
-            ax.set_ylabel("Total Score")
-            ax.grid(True, linestyle="--", alpha=0.5)
-            st.pyplot(fig, clear_figure=True)
-
-        with t_tabs[1]:
-            fig, ax = plt.subplots(figsize=(10, 5))
-            sns.lineplot(
-                data=df_teams[[f"{team_a_label} Wins", f"{team_b_label} Wins"]],
-                drawstyle="steps-post",
-                ax=ax
-            )
-            ax.set_title("Cumulative Team Wins")
-            ax.set_xlabel("Date")
-            ax.set_ylabel("Wins")
-            ax.grid(True, linestyle="--", alpha=0.5)
-            st.pyplot(fig, clear_figure=True)
-    else:
-        st.info("Select members for Team A and/or Team B to see team charts.")
+            with t_tabs[1]:
+                fig, ax = plt.subplots(figsize=(10, 5))
+                sns.lineplot(
+                    data=df_teams[[f"{team_a_label} Wins", f"{team_b_label} Wins"]],
+                    drawstyle="steps-post",
+                    ax=ax
+                )
+                ax.set_title("Cumulative Team Wins")
+                ax.set_xlabel("Date")
+                ax.set_ylabel("Wins")
+                ax.grid(True, linestyle="--", alpha=0.5)
+                st.pyplot(fig, clear_figure=True)
+        else:
+            st.info("Select members for Team A and/or Team B to see team charts.")
 
     # Scoring details
     st.markdown("### Scoring details")
