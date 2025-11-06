@@ -244,7 +244,7 @@ if uploaded:
         st.write("")  # spacer for alignment
         if st.button("Reset", use_container_width=True, help="Reset to full available date range"):
             st.session_state["date_range"] = (min_d, max_d)
-            st.experimental_rerun()
+            st.rerun()  # <- fix for experimental_rerun deprecation
 
     def _normalize_date_input(val, fallback_start, fallback_end):
         if isinstance(val, (list, tuple)):
@@ -405,17 +405,11 @@ if uploaded:
             df_teams[f"{team_a_label} Wins"] = (df_teams[f"{team_a_label} Total"] < df_teams[f"{team_b_label} Total"]).astype(int).cumsum()
             df_teams[f"{team_b_label} Wins"] = (df_teams[f"{team_b_label} Total"] < df_teams[f"{team_a_label} Total"]).astype(int).cumsum()
 
-            t_tabs = st.tabs(["Team totals over time", "Cumulative wins"])
-            with t_tabs[0]:
-                fig, ax = plt.subplots(figsize=(10, 5))
-                sns.lineplot(data=df_teams[[f"{team_a_label} Total", f"{team_b_label} Total"]], ax=ax)
-                ax.set_title("Daily Team Totals")
-                ax.set_xlabel("Date")
-                ax.set_ylabel("Total Score")
-                ax.grid(True, linestyle="--", alpha=0.5)
-                st.pyplot(fig, clear_figure=True)
+            # Tabs: Cumulative wins first (default)
+            t_tabs = st.tabs(["Cumulative wins", "Team totals over time"])
 
-            with t_tabs[1]:
+            # First tab (default): Cumulative wins
+            with t_tabs[0]:
                 fig, ax = plt.subplots(figsize=(10, 5))
                 sns.lineplot(
                     data=df_teams[[f"{team_a_label} Wins", f"{team_b_label} Wins"]],
@@ -425,6 +419,16 @@ if uploaded:
                 ax.set_title("Cumulative Team Wins")
                 ax.set_xlabel("Date")
                 ax.set_ylabel("Wins")
+                ax.grid(True, linestyle="--", alpha=0.5)
+                st.pyplot(fig, clear_figure=True)
+
+            # Second tab: Daily totals
+            with t_tabs[1]:
+                fig, ax = plt.subplots(figsize=(10, 5))
+                sns.lineplot(data=df_teams[[f"{team_a_label} Total", f"{team_b_label} Total"]], ax=ax)
+                ax.set_title("Daily Team Totals")
+                ax.set_xlabel("Date")
+                ax.set_ylabel("Total Score")
                 ax.grid(True, linestyle="--", alpha=0.5)
                 st.pyplot(fig, clear_figure=True)
         else:
