@@ -11,6 +11,11 @@ import seaborn as sns
 st.set_page_config(page_title="Wordle Stats", page_icon="🟩", layout="wide")
 st.title("Wordle WhatsApp Analyzer 🟩🟨⬛")
 
+# New intro line (above privacy note)
+st.markdown(
+    "Upload the chat logs of your friends-and-family Wordle WhatsApp group to get full detailed analysis of scores and averages for free."
+)
+
 # Top privacy note
 st.success(
     "Privacy: Your file is processed in memory for this session only. "
@@ -434,6 +439,9 @@ if uploaded:
         "- **Overall leader** uses the **cumulative sum** over time.\n"
         "- **Rolling 28-day average** and other averages include 8s."
     )
+
+    # Final disclaimer at the very end
+    st.caption("This app is not affiliated with Wordle or the New York Times")
 
 else:
     st.info("Upload your `_chat.txt` export to begin.")
